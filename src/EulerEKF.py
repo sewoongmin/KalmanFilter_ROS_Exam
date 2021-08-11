@@ -2,7 +2,7 @@
 
 import rospy
 from sensor_msgs.msg import Imu
-from geometry_msgs.msg import Vector3
+from geometry_msgs.msg import Vector3, PoseStamped
 from tf.transformations import quaternion_from_euler
 import numpy as np
 import numpy.linalg as lin
@@ -14,6 +14,7 @@ class ExtendedKalman(object) :
         self._imu_sub = rospy.Subscriber("mavros/imu/data_raw", Imu, self.CallBack)
         self._euler_sub = rospy.Subscriber("accel_to_euler", Vector3, self.EulerCallBack)
         self._kalman_pub = rospy.Publisher("ekf", Vector3, queue_size = 10)
+        self._kalman_pose_pub = rospy.Publisher("kalman_pose_EKF", PoseStamped, queue_size=10)
         self._dt = 0.02
         self._H = np.zeros((2,3))
         self._H[0][0] = 1
@@ -30,8 +31,13 @@ class ExtendedKalman(object) :
         self._z = np.zeros((2,1))
         self._xhat = np.zeros((3,1))
         self._degree = Vector3()
+        self._pose = PoseStamped()
+
+        self._pose.header.stamp = rospy.Time.now()
+        self._pose.header.frame_id = "base_link"
 
     def CallBack(self, msg) :
+
         rates = np.zeros((3,1))
         rates[0][0] = msg.angular_velocity.x
         rates[1][0] = msg.angular_velocity.y
@@ -50,6 +56,18 @@ class ExtendedKalman(object) :
         self._degree.x = self._x[0][0] * 180/math.pi
         self._degree.y = self._x[1][0] * 180/math.pi
         self._degree.z = self._x[2][0] * 180/math.pi
+
+
+        quater = quaternion_from_euler(self._x[0][0], self._x[1][0], self._x[2][0])
+
+        self._pose.pose.position.x = 0
+        self._pose.pose.position.y = 0
+        self._pose.pose.position.z = 0
+        self._pose.pose.orientation.x = quater[0]
+        self._pose.pose.orientation.y = quater[1]
+        self._pose.pose.orientation.z = quater[2]
+        self._pose.pose.orientation.w = -quater[3]
+    
 
     def EulerCallBack(self, msg) :
         phi = msg.x*math.pi/180
@@ -90,8 +108,10 @@ class ExtendedKalman(object) :
         xdot[2][0] = q*math.sin(phi)/math.cos(theta) + r* math.cos(phi)/math.cos(theta)
 
         self._xp = xhat + self._dt*xdot
+    
     def Publish(self) :
         self._kalman_pub.publish(self._degree)
+        self._kalman_pose_pub.publish(self._pose)
 
 if __name__ == '__main__' :
     rospy.init_node("euler_ekf")
